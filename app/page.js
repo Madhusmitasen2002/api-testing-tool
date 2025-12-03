@@ -15,6 +15,7 @@ export default function Home() {
   const [headers, setHeaders] = useState("");
   const [response, setResponse] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false); // mobile toggle
 
   // LOAD HISTORY
   async function loadHistory() {
@@ -22,7 +23,6 @@ export default function Home() {
       .from("history")
       .select("*")
       .order("created_at", { ascending: false });
-
     setHistory(data || []);
   }
 
@@ -37,22 +37,18 @@ export default function Home() {
     loadCollections();
   }, []);
 
-  // CREATE COLLECTION
   async function createCollection() {
     if (!newCollectionName.trim()) return;
     const { data } = await supabase
       .from("collections")
       .insert({ name: newCollectionName })
       .select();
-
     setNewCollectionName("");
     if (data) loadCollections();
   }
 
-  // SAVE REQUEST TO COLLECTION
   async function saveToCollection() {
     if (!selectedCollection) return;
-
     await supabase.from("collection_items").insert({
       collection_id: selectedCollection,
       url,
@@ -62,7 +58,6 @@ export default function Home() {
     });
   }
 
-  // DELETE HISTORY
   async function deleteHistoryItem(id) {
     await supabase.from("history").delete().eq("id", id);
     loadHistory();
@@ -73,51 +68,32 @@ export default function Home() {
     loadHistory();
   }
 
-  // COPY JSON
   const copyJSON = () => {
-    if (response?.body) {
-      navigator.clipboard.writeText(JSON.stringify(response.body, null, 2));
-    }
+    if (response?.body) navigator.clipboard.writeText(JSON.stringify(response.body, null, 2));
   };
 
-  // COPY AS CURL
   const copyCurl = () => {
-    let curl = `curl -X ${method} \"${url}\"`;
-
+    let curl = `curl -X ${method} "${url}"`;
     if (headers.trim()) {
       const h = JSON.parse(headers);
       Object.keys(h).forEach((k) => {
-        curl += ` -H \"${k}: ${h[k]}\"`;
+        curl += ` -H "${k}: ${h[k]}"`;
       });
     }
-
-    if (body.trim() && method !== "GET") {
-      curl += ` -d '${body}'`;
-    }
-
+    if (body.trim() && method !== "GET") curl += ` -d '${body}'`;
     navigator.clipboard.writeText(curl);
   };
 
-  // SEND REQUEST
   const sendRequest = async () => {
     try {
       setLoading(true);
       const startTime = performance.now();
-
-      let parsedHeaders = {};
-      if (headers.trim()) parsedHeaders = JSON.parse(headers);
-
+      let parsedHeaders = headers.trim() ? JSON.parse(headers) : {};
       const options = {
         method,
-        headers: {
-          "Content-Type": "application/json",
-          ...parsedHeaders,
-        },
+        headers: { "Content-Type": "application/json", ...parsedHeaders },
       };
-
-      if (method !== "GET" && body.trim()) {
-        options.body = body;
-      }
+      if (method !== "GET" && body.trim()) options.body = body;
 
       const res = await fetch(url, options);
       const timeTaken = (performance.now() - startTime).toFixed(1);
@@ -139,7 +115,6 @@ export default function Home() {
 
       setResponse(resultObj);
 
-      // SAVE TO HISTORY
       await supabase.from("history").insert({
         url,
         method,
@@ -157,10 +132,21 @@ export default function Home() {
   };
 
   return (
-    <div className="flex h-screen bg-gray-100 text-black">
+    <div className="flex h-screen bg-gray-100 text-black overflow-hidden">
 
-      {/* LEFT SIDEBAR */}
-      <div className="w-72 bg-white border-r p-4 overflow-auto hidden md:block">
+      {/* MOBILE SIDEBAR OVERLAY */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 z-40 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {/* SIDEBAR */}
+      <div
+        className={`fixed top-0 left-0 h-full w-72 bg-white border-r p-4 overflow-auto z-50 transform transition-transform duration-300 ease-in-out
+          ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} md:translate-x-0 md:static md:flex-shrink-0`}
+      >
         <h2 className="text-xl font-bold mb-3">History</h2>
 
         {history.map((entry) => (
@@ -172,12 +158,12 @@ export default function Home() {
                 setMethod(entry.method);
                 setBody(JSON.stringify(entry.body ?? {}, null, 2));
                 setHeaders(JSON.stringify(entry.headers ?? {}, null, 2));
+                setSidebarOpen(false); // auto close on mobile
               }}
             >
               <p className="font-bold">{entry.method}</p>
               <p className="text-xs text-gray-600 break-all">{entry.url}</p>
             </div>
-
             <button
               onClick={() => deleteHistoryItem(entry.id)}
               className="text-red-500 text-xs mt-1"
@@ -194,10 +180,9 @@ export default function Home() {
           Clear All History
         </button>
 
-        {/* COLLECTIONS */}
         <h2 className="text-xl font-bold mt-6 mb-3">Collections</h2>
 
-        <div className="flex gap-2 mb-3">
+        <div className="flex gap-2 mb-3 flex-col sm:flex-row">
           <input
             type="text"
             value={newCollectionName}
@@ -207,7 +192,7 @@ export default function Home() {
           />
           <button
             onClick={createCollection}
-            className="bg-black text-white px-3 rounded"
+            className="bg-black text-white px-3 rounded mt-2 sm:mt-0"
           >
             Add
           </button>
@@ -216,9 +201,7 @@ export default function Home() {
         {collections.map((c) => (
           <div
             key={c.id}
-            className={`p-2 border rounded mb-2 cursor-pointer ${
-              selectedCollection === c.id ? "bg-gray-200" : "bg-gray-50"
-            }`}
+            className={`p-2 border rounded mb-2 cursor-pointer ${selectedCollection === c.id ? "bg-gray-200" : "bg-gray-50"}`}
             onClick={() => setSelectedCollection(c.id)}
           >
             {c.name}
@@ -235,103 +218,89 @@ export default function Home() {
         )}
       </div>
 
-      {/* CENTER */}
-      <div className="flex-1 p-6 overflow-auto">
-        <h1 className="text-2xl font-bold mb-4">API TESTING TOOL</h1>
+      {/* MAIN PANEL */}
+      <div className="flex-1 flex flex-col overflow-auto">
+        {/* MOBILE TOGGLE BUTTON */}
+        <div className="md:hidden p-2 bg-black text-white">
+          <button onClick={() => setSidebarOpen(true)} className="w-full">Open Sidebar</button>
+        </div>
 
-        <div className="flex gap-3 mb-4 flex-col md:flex-row">
-          <select
-            value={method}
-            onChange={(e) => setMethod(e.target.value)}
-            className="p-2 border rounded w-32 bg-white"
+        <div className="p-6 flex-1 overflow-auto">
+          <h1 className="text-2xl font-bold mb-4">API TESTING TOOL</h1>
+
+          <div className="flex gap-3 mb-4 flex-col md:flex-row">
+            <select
+              value={method}
+              onChange={(e) => setMethod(e.target.value)}
+              className="p-2 border rounded w-32 bg-white"
+            >
+              <option>GET</option>
+              <option>POST</option>
+              <option>PUT</option>
+              <option>DELETE</option>
+            </select>
+
+            <input
+              type="text"
+              placeholder="Enter request URL"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              className="p-2 border flex-1 rounded"
+            />
+          </div>
+
+          <div className="mb-4">
+            <h3 className="font-semibold mb-1">Request Body (JSON)</h3>
+            <textarea
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              className="w-full p-3 border rounded h-32"
+            />
+          </div>
+
+          <div className="mb-4">
+            <h3 className="font-semibold mb-1">Headers (JSON)</h3>
+            <textarea
+              value={headers}
+              onChange={(e) => setHeaders(e.target.value)}
+              className="w-full p-3 border rounded h-28"
+            />
+          </div>
+
+          <button
+            onClick={sendRequest}
+            disabled={loading}
+            className="bg-black text-white font-semibold px-6 py-2 rounded"
           >
-            <option>GET</option>
-            <option>POST</option>
-            <option>PUT</option>
-            <option>DELETE</option>
-          </select>
+            {loading ? "Sending..." : "Send Request"}
+          </button>
 
-          <input
-            type="text"
-            placeholder="Enter request URL"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            className="p-2 border flex-1 rounded"
-          />
-        </div>
+          {/* RESPONSE PANEL */}
+          <div className="mt-6 bg-black text-green-400 p-6 rounded overflow-auto">
+            <h2 className="text-xl font-bold text-white mb-2">Response</h2>
 
-        {/* BODY */}
-        <div className="mb-4">
-          <h3 className="font-semibold mb-1">Request Body (JSON)</h3>
-          <textarea
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-            className="w-full p-3 border rounded h-32"
-          />
-        </div>
+            {response && (
+              <div className="flex gap-2 mb-3 flex-wrap">
+                <button onClick={copyJSON} className="bg-gray-700 text-white px-3 py-1 rounded text-sm">Copy JSON</button>
+                <button onClick={copyCurl} className="bg-gray-700 text-white px-3 py-1 rounded text-sm">Copy cURL</button>
+              </div>
+            )}
 
-        {/* HEADERS */}
-        <div className="mb-4">
-          <h3 className="font-semibold mb-1">Headers (JSON)</h3>
-          <textarea
-            value={headers}
-            onChange={(e) => setHeaders(e.target.value)}
-            className="w-full p-3 border rounded h-28"
-          />
-        </div>
+            {response && (
+              <div className="flex gap-4 text-white mb-3 text-sm flex-wrap">
+                <p>Status: <span className={response.ok ? "text-green-400" : "text-red-400"}> {response.status}</span></p>
+                <p>Time: <span className="text-blue-400">{response.time} ms</span></p>
+              </div>
+            )}
 
-        <button
-          onClick={sendRequest}
-          disabled={loading}
-          className="bg-black text-white font-semibold px-6 py-2 rounded"
-        >
-          {loading ? "Sending..." : "Send Request"}
-        </button>
-      </div>
-
-      {/* RESPONSE PANEL */}
-      <div className="w-full md:w-[40%] bg-black text-green-400 p-6 overflow-auto">
-        <h2 className="text-xl font-bold text-white mb-2">Response</h2>
-
-        {response && (
-          <div className="flex gap-2 mb-3">
-            <button
-              onClick={copyJSON}
-              className="bg-gray-700 text-white px-3 py-1 rounded text-sm"
-            >
-              Copy JSON
-            </button>
-
-            <button
-              onClick={copyCurl}
-              className="bg-gray-700 text-white px-3 py-1 rounded text-sm"
-            >
-              Copy cURL
-            </button>
+            <div className="bg-black p-3 rounded text-green-400 text-sm overflow-auto">
+              {response ? (
+                <pre className="whitespace-pre-wrap">{JSON.stringify(response, null, 2)}</pre>
+              ) : (
+                <p>No response yet...</p>
+              )}
+            </div>
           </div>
-        )}
-
-        {response && (
-          <div className="flex gap-4 text-white mb-3 text-sm">
-            <p>
-              Status:
-              <span className={response.ok ? "text-green-400" : "text-red-400"}>
-                {response.status}
-              </span>
-            </p>
-
-            <p>
-              Time: <span className="text-blue-400">{response.time} ms</span>
-            </p>
-          </div>
-        )}
-
-        <div className="bg-black p-3 rounded text-green-400 text-sm overflow-auto">
-          {response ? (
-            <pre className="whitespace-pre-wrap">{JSON.stringify(response, null, 2)}</pre>
-          ) : (
-            <p>No response yet...</p>
-          )}
         </div>
       </div>
     </div>
